@@ -1,0 +1,10 @@
+App(
+    appid="claude_ble",
+    name="Claude BLE",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="claude_ble_app_main",
+    requires=["gui", "ble"],
+    stack_size=4 * 1024,
+    fap_category="Tools",
+    fap_version=(0, 1),
+)
