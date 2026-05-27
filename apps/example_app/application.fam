@@ -1,0 +1,10 @@
+App(
+    appid="example_app",
+    name="Example App",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="example_app_main",
+    requires=["gui"],
+    stack_size=1 * 1024,
+    fap_category="Misc",
+    fap_version=(0, 1),
+)
