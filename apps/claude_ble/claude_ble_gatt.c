@@ -30,22 +30,28 @@ static const uint8_t kResponseUuid[16] = {
     0x00, 0x10, 0x00, 0x00, 0x03, 0x00, 0xA0, 0xC1
 };
 
-static uint16_t      service_handle        = 0;
-static uint16_t      prompt_char_handle    = 0;
-static uint16_t      response_char_handle  = 0;
-static ClaudeBleApp* gatt_ctx             = NULL;
+static uint16_t      service_handle       = 0;
+static uint16_t      prompt_char_handle   = 0;
+static uint16_t      response_char_handle = 0;
+static ClaudeBleApp* gatt_ctx            = NULL;
 
-// Called from BLE ISR / event thread when the companion writes a response chunk.
+// Called when the companion writes a response chunk to the Response characteristic.
 static void on_response_written(const uint8_t* data, uint16_t len) {
     if(!gatt_ctx || len == 0) return;
 
+    // Null byte is the end-of-transmission sentinel sent by the companion.
+    // The accumulation / reassembly logic goes here once chunking is wired up.
+    if(len == 1 && data[0] == '\0') {
+        view_dispatcher_send_custom_event(
+            gatt_ctx->view_dispatcher, ClaudeBleEventResponseReceived);
+        return;
+    }
+
+    // Append chunk — naive single-chunk version; extend for multi-chunk reassembly.
     uint16_t copy_len =
         (len < (CLAUDE_BLE_RESPONSE_MAX_LEN - 1)) ? len : (CLAUDE_BLE_RESPONSE_MAX_LEN - 1);
     memcpy(gatt_ctx->response, data, copy_len);
     gatt_ctx->response[copy_len] = '\0';
-
-    view_dispatcher_send_custom_event(
-        gatt_ctx->view_dispatcher, ClaudeBleEventResponseReceived);
 }
 
 static void on_connection_changed(bool connected) {
@@ -66,19 +72,21 @@ void claude_ble_gatt_start(ClaudeBleApp* app) {
     //     UUID_TYPE_128, (Service_UUID_t*)kServiceUuid,
     //     PRIMARY_SERVICE, /*max_attr_records=*/6, &service_handle);
     //
+    // Prompt char: NOTIFY — Flipper (server) notifies companion when user sends a prompt.
     // aci_gatt_add_char(
     //     service_handle, UUID_TYPE_128, (Char_UUID_t*)kPromptUuid,
     //     CLAUDE_BLE_MTU_PAYLOAD,
-    //     CHAR_PROP_WRITE_WITHOUT_RESP,
-    //     ATTR_PERMISSION_NONE, GATT_NOTIFY_ATTRIBUTE_WRITE,
+    //     CHAR_PROP_NOTIFY,
+    //     ATTR_PERMISSION_NONE, GATT_DONT_NOTIFY_EVENTS,
     //     /*enc_key_size=*/10, CHAR_VALUE_LEN_VARIABLE,
     //     &prompt_char_handle);
     //
+    // Response char: WRITE_WITHOUT_RESP — companion writes response back to Flipper.
     // aci_gatt_add_char(
     //     service_handle, UUID_TYPE_128, (Char_UUID_t*)kResponseUuid,
     //     CLAUDE_BLE_MTU_PAYLOAD,
-    //     CHAR_PROP_NOTIFY,
-    //     ATTR_PERMISSION_NONE, GATT_DONT_NOTIFY_EVENTS,
+    //     CHAR_PROP_WRITE_WITHOUT_RESP,
+    //     ATTR_PERMISSION_NONE, GATT_NOTIFY_ATTRIBUTE_WRITE,
     //     /*enc_key_size=*/10, CHAR_VALUE_LEN_VARIABLE,
     //     &response_char_handle);
     //
@@ -108,7 +116,7 @@ void claude_ble_gatt_send_prompt(ClaudeBleApp* app, const char* prompt) {
     uint16_t len = (uint16_t)strlen(prompt);
     if(len > CLAUDE_BLE_MTU_PAYLOAD) len = CLAUDE_BLE_MTU_PAYLOAD;
 
-    // TODO (path A): notify the Prompt characteristic so the companion receives it
+    // TODO (path A): update Prompt characteristic value — triggers NOTIFY to companion
     // aci_gatt_update_char_value(
     //     service_handle, prompt_char_handle, 0, len, (const uint8_t*)prompt);
     //

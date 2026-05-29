@@ -1,0 +1,26 @@
+{
+  "name": "claude-ble-companion",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "start": "react-native start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.0",
+    "buffer": "^6.0.3",
+    "react": "18.3.1",
+    "react-native": "0.74.5",
+    "react-native-ble-plx": "^3.4.0",
+    "react-native-config": "^1.5.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@react-native/babel-preset": "^0.74.0",
+    "@react-native/typescript-config": "^0.74.0",
+    "@types/react": "^18.3.0",
+    "typescript": "^5.3.0"
+  }
+}
