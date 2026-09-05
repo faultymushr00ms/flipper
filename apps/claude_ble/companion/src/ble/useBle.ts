@@ -14,11 +14,17 @@ function utf8ToB64(str: string): string {
   return Buffer.from(str, 'utf-8').toString('base64');
 }
 
+// Matches any Flipper device name ("Flipper <Name>").
+// If you renamed your Flipper, update this check.
+function isFlipperDevice(device: Device): boolean {
+  return device.name?.startsWith('Flipper') ?? false;
+}
+
 export function useBle(onPromptReceived: (prompt: string) => void) {
-  const [status, setStatus] = useState<BleStatus>('idle');
-  const deviceRef    = useRef<Device | null>(null);
-  const onPromptRef  = useRef(onPromptReceived);
-  onPromptRef.current = onPromptReceived;
+  const [status, setStatus]  = useState<BleStatus>('idle');
+  const deviceRef            = useRef<Device | null>(null);
+  const onPromptRef          = useRef(onPromptReceived);
+  onPromptRef.current        = onPromptReceived;
 
   const connect = useCallback(async () => {
     const bleState = await manager.state();
@@ -29,44 +35,43 @@ export function useBle(onPromptReceived: (prompt: string) => void) {
 
     setStatus('scanning');
 
-    manager.startDeviceScan(
-      [CLAUDE_BLE.SERVICE_UUID],
-      { allowDuplicates: false },
-      async (error, scanned) => {
-        if (error || !scanned) {
-          setStatus('error');
-          return;
-        }
+    // Scan without a service UUID filter — OFW may not broadcast the NUS UUID
+    // in the advertisement packet; we identify the Flipper by its device name.
+    manager.startDeviceScan(null, { allowDuplicates: false }, async (error, scanned) => {
+      if (error) {
+        setStatus('error');
+        return;
+      }
+      if (!scanned || !isFlipperDevice(scanned)) return;
 
-        manager.stopDeviceScan();
-        setStatus('connecting');
+      manager.stopDeviceScan();
+      setStatus('connecting');
 
-        try {
-          const connected = await scanned.connect({ requestMTU: 247 });
-          await connected.discoverAllServicesAndCharacteristics();
-          deviceRef.current = connected;
-          setStatus('connected');
+      try {
+        const connected = await scanned.connect({ requestMTU: 247 });
+        await connected.discoverAllServicesAndCharacteristics();
+        deviceRef.current = connected;
+        setStatus('connected');
 
-          // Subscribe to Prompt characteristic — fires when Flipper sends us a prompt
-          connected.monitorCharacteristicForService(
-            CLAUDE_BLE.SERVICE_UUID,
-            CLAUDE_BLE.PROMPT_UUID,
-            (err, char) => {
-              if (err || !char?.value) return;
-              const prompt = b64ToUtf8(char.value).replace(/\x00/g, '').trim();
-              if (prompt) onPromptRef.current(prompt);
-            },
-          );
+        // Subscribe to TX characteristic — fires when Flipper sends us a prompt
+        connected.monitorCharacteristicForService(
+          CLAUDE_BLE.SERVICE_UUID,
+          CLAUDE_BLE.PROMPT_UUID,
+          (err, char) => {
+            if (err || !char?.value) return;
+            const prompt = b64ToUtf8(char.value).replace(/\x00/g, '').trim();
+            if (prompt) onPromptRef.current(prompt);
+          },
+        );
 
-          connected.onDisconnected(() => {
-            deviceRef.current = null;
-            setStatus('idle');
-          });
-        } catch {
-          setStatus('error');
-        }
-      },
-    );
+        connected.onDisconnected(() => {
+          deviceRef.current = null;
+          setStatus('idle');
+        });
+      } catch {
+        setStatus('error');
+      }
+    });
   }, []);
 
   const sendResponse = useCallback(async (text: string) => {
@@ -75,6 +80,7 @@ export function useBle(onPromptReceived: (prompt: string) => void) {
 
     const bytes = Buffer.from(text, 'utf-8');
 
+    // Write response in MTU-sized chunks to the RX characteristic
     for (let i = 0; i < bytes.length; i += BLE_MTU_PAYLOAD) {
       const chunk = bytes.slice(i, i + BLE_MTU_PAYLOAD);
       await device.writeCharacteristicWithoutResponseForService(
